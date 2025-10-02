@@ -3,10 +3,11 @@ const { google } = require("googleapis");
 module.exports = async function (client) {
   const ytKey = process.env.YOUTUBE_API_KEY;
   const ytChannelId = process.env.YOUTUBE_CHANNEL_ID;
-  const chatChannelId = process.env.DISCORD_CHAT_CHANNEL_ID;
+  const ytVideoId = process.env.YOUTUBE_VIDEO_ID;
+  const chatChannelId = process.env.VIEWER_CHANNEL_ID;
 
-  if (!ytKey || !ytChannelId) {
-    console.log("❌ YOUTUBE_API_KEY or YOUTUBE_CHANNEL_ID missing in .env");
+  if (!ytKey || (!ytChannelId && !ytVideoId)) {
+    console.log("❌ YOUTUBE_API_KEY and either YOUTUBE_CHANNEL_ID or YOUTUBE_VIDEO_ID required in .env");
     return;
   }
 
@@ -15,25 +16,38 @@ module.exports = async function (client) {
   const youtube = google.youtube({ version: "v3", auth: ytKey });
 
   try {
-    const res = await youtube.search.list({
-      part: "id",
-      channelId: ytChannelId,
-      eventType: "live",
-      type: "video"
-    });
+    let liveVideoId = ytVideoId;
 
-    if (!res.data.items.length) {
-      console.log("❌ No live stream found on YouTube");
-      return;
+    // اگه VIDEO_ID ست نشده بود، از CHANNEL_ID جستجو می‌کنیم
+    if (!liveVideoId && ytChannelId) {
+      const res = await youtube.search.list({
+        part: "id",
+        channelId: ytChannelId,
+        eventType: "live",
+        type: "video"
+      });
+
+      if (!res.data.items.length) {
+        console.log("❌ No live stream found on YouTube");
+        return;
+      }
+
+      liveVideoId = res.data.items[0].id.videoId;
     }
 
-    const liveVideoId = res.data.items[0].id.videoId;
+    // گرفتن liveChatId
     const liveChatRes = await youtube.videos.list({
       part: "liveStreamingDetails",
       id: liveVideoId
     });
 
+    if (!liveChatRes.data.items.length || !liveChatRes.data.items[0].liveStreamingDetails.activeLiveChatId) {
+      console.log("❌ This video has no active live chat.");
+      return;
+    }
+
     const liveChatId = liveChatRes.data.items[0].liveStreamingDetails.activeLiveChatId;
+    console.log(`✅ Found liveChatId: ${liveChatId}`);
 
     async function pollChat() {
       try {
